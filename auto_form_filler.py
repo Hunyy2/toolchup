@@ -808,8 +808,8 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
 
     # !!! THAY ĐỔI URL NÀY KHI BẠN DEPLOY LÊN RENDER !!!
-    # BACKEND_URL = "https://your-backend-app-name.onrender.com"
-    BACKEND_URL = "http://127.0.0.1:5000"
+    BACKEND_URL = "https://your-backend-app-name.onrender.com"
+    # BACKEND_URL = "http://127.0.0.1:5000"
     # Để test local, dùng: BACKEND_URL = "http://127.0.0.1:5000"
 
     # Tạo cửa sổ chính và hiển thị nó
