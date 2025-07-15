@@ -17,7 +17,6 @@ from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException, ElementNotInteractableException
 from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime
-import requests  # Thư viện để gọi API
 
 # Các thư viện cần thiết cho AI
 try:
@@ -27,88 +26,6 @@ try:
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     LANGCHAIN_AVAILABLE = False
-
-
-class AuthManager:
-    """Quản lý việc đăng nhập và xác thực với backend."""
-
-    def __init__(self, base_url):
-        self.base_url = base_url
-        self.token = None
-
-    def login(self, username, password):
-        try:
-            response = requests.post(
-                f"{self.base_url}/login",
-                json={"username": username, "password": password},
-                timeout=10,  # Chờ tối đa 10 giây
-            )
-            if response.status_code == 200:
-                self.token = response.json().get("token")
-                return True, "Đăng nhập thành công!"
-            else:
-                error_message = response.json().get("message", "Lỗi không xác định")
-                return False, error_message
-        except requests.exceptions.RequestException as e:
-            return False, f"Lỗi kết nối đến máy chủ: {e}"
-
-
-class LoginWindow(tk.Toplevel):
-    """Cửa sổ modal yêu cầu người dùng đăng nhập."""
-
-    def __init__(self, parent, auth_manager):
-        super().__init__(parent)
-        self.title("Đăng nhập")
-        self.geometry("350x180")
-        self.resizable(False, False)
-
-        self.auth_manager = auth_manager
-        self.login_successful = False
-
-        # --- Tạo các widget ---
-        frame = ttk.Frame(self, padding="15")
-        frame.pack(fill=tk.BOTH, expand=True)
-        frame.columnconfigure(1, weight=1)
-
-        ttk.Label(frame, text="Tên đăng nhập:").grid(
-            row=0, column=0, sticky="w", pady=5
-        )
-        self.username_entry = ttk.Entry(frame)
-        self.username_entry.grid(row=0, column=1, sticky="ew", pady=5)
-
-        ttk.Label(frame, text="Mật khẩu:").grid(row=1, column=0, sticky="w", pady=5)
-        self.password_entry = ttk.Entry(frame, show="*")
-        self.password_entry.grid(row=1, column=1, sticky="ew", pady=5)
-
-        self.login_button = ttk.Button(
-            frame, text="Đăng nhập", command=self.attempt_login
-        )
-        self.login_button.grid(row=2, column=0, columnspan=2, pady=15)
-
-        # --- Binding và cài đặt modal ---
-        self.username_entry.focus()
-        self.bind("<Return>", lambda event: self.attempt_login())
-        self.protocol("WM_DELETE_WINDOW", self.on_close_button)
-        self.transient(parent)
-        self.grab_set()
-
-    def attempt_login(self):
-        username = self.username_entry.get()
-        password = self.password_entry.get()
-        if not username or not password:
-            messagebox.showerror("Lỗi", "Vui lòng nhập đủ thông tin.", parent=self)
-            return
-
-        success, message = self.auth_manager.login(username, password)
-        if success:
-            self.login_successful = True
-            self.destroy()  # Đăng nhập thành công, đóng cửa sổ
-        else:
-            messagebox.showerror("Đăng nhập thất bại", message, parent=self)
-
-    def on_close_button(self):
-        self.login_successful = False
-        self.destroy()
 
 
 # --- CÁC HÀM TIỆN ÍCH ---
@@ -803,32 +720,7 @@ class AutoFillerApp(tk.Tk):
             self.destroy()
 
 
-# --- SỬA ĐOẠN NÀY ---
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-
-    # !!! THAY ĐỔI URL NÀY KHI BẠN DEPLOY LÊN RENDER !!!
-    # BACKEND_URL = "https://your-backend-app-name.onrender.com"
-    BACKEND_URL = "http://127.0.0.1:5000"
-    # Để test local, dùng: BACKEND_URL = "http://127.0.0.1:5000"
-
-    # Tạo cửa sổ chính và hiển thị nó
-    root = tk.Tk()
-
-    # Khởi tạo trình quản lý xác thực và cửa sổ đăng nhập
-    auth_manager = AuthManager(BACKEND_URL)
-    login_window = LoginWindow(root, auth_manager)
-
-    # Chờ cho đến khi cửa sổ đăng nhập được đóng
-    root.wait_window(login_window)
-
-    # Kiểm tra xem đăng nhập có thành công không
-    if login_window.login_successful:
-        print("Đăng nhập thành công, đang mở ứng dụng chính...")
-        # Ẩn cửa sổ đăng nhập và hiện cửa sổ chính
-        root.deiconify()
-        app = AutoFillerApp()  # Bỏ 'root'
-        root.mainloop()
-    else:
-        print("Đăng nhập thất bại hoặc đã đóng cửa sổ. Thoát chương trình.")
-        root.destroy()
+    app = AutoFillerApp()
+    app.mainloop()

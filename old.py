@@ -525,4 +525,3 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
     app = AutoFillerApp()
     app.mainloop()
-# old.py - Phiên bản cũ của công cụ điền form tự động

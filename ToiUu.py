@@ -17,7 +17,6 @@ from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException, ElementNotInteractableException
 from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime
-import requests  # Thư viện để gọi API
 
 # Các thư viện cần thiết cho AI
 try:
@@ -28,87 +27,7 @@ try:
 except ImportError:
     LANGCHAIN_AVAILABLE = False
 
-
-class AuthManager:
-    """Quản lý việc đăng nhập và xác thực với backend."""
-
-    def __init__(self, base_url):
-        self.base_url = base_url
-        self.token = None
-
-    def login(self, username, password):
-        try:
-            response = requests.post(
-                f"{self.base_url}/login",
-                json={"username": username, "password": password},
-                timeout=10,  # Chờ tối đa 10 giây
-            )
-            if response.status_code == 200:
-                self.token = response.json().get("token")
-                return True, "Đăng nhập thành công!"
-            else:
-                error_message = response.json().get("message", "Lỗi không xác định")
-                return False, error_message
-        except requests.exceptions.RequestException as e:
-            return False, f"Lỗi kết nối đến máy chủ: {e}"
-
-
-class LoginWindow(tk.Toplevel):
-    """Cửa sổ modal yêu cầu người dùng đăng nhập."""
-
-    def __init__(self, parent, auth_manager):
-        super().__init__(parent)
-        self.title("Đăng nhập")
-        self.geometry("350x180")
-        self.resizable(False, False)
-
-        self.auth_manager = auth_manager
-        self.login_successful = False
-
-        # --- Tạo các widget ---
-        frame = ttk.Frame(self, padding="15")
-        frame.pack(fill=tk.BOTH, expand=True)
-        frame.columnconfigure(1, weight=1)
-
-        ttk.Label(frame, text="Tên đăng nhập:").grid(
-            row=0, column=0, sticky="w", pady=5
-        )
-        self.username_entry = ttk.Entry(frame)
-        self.username_entry.grid(row=0, column=1, sticky="ew", pady=5)
-
-        ttk.Label(frame, text="Mật khẩu:").grid(row=1, column=0, sticky="w", pady=5)
-        self.password_entry = ttk.Entry(frame, show="*")
-        self.password_entry.grid(row=1, column=1, sticky="ew", pady=5)
-
-        self.login_button = ttk.Button(
-            frame, text="Đăng nhập", command=self.attempt_login
-        )
-        self.login_button.grid(row=2, column=0, columnspan=2, pady=15)
-
-        # --- Binding và cài đặt modal ---
-        self.username_entry.focus()
-        self.bind("<Return>", lambda event: self.attempt_login())
-        self.protocol("WM_DELETE_WINDOW", self.on_close_button)
-        self.transient(parent)
-        self.grab_set()
-
-    def attempt_login(self):
-        username = self.username_entry.get()
-        password = self.password_entry.get()
-        if not username or not password:
-            messagebox.showerror("Lỗi", "Vui lòng nhập đủ thông tin.", parent=self)
-            return
-
-        success, message = self.auth_manager.login(username, password)
-        if success:
-            self.login_successful = True
-            self.destroy()  # Đăng nhập thành công, đóng cửa sổ
-        else:
-            messagebox.showerror("Đăng nhập thất bại", message, parent=self)
-
-    def on_close_button(self):
-        self.login_successful = False
-        self.destroy()
+MAPPING_FILE = "form_mapping.json"
 
 
 # --- CÁC HÀM TIỆN ÍCH ---
@@ -188,7 +107,6 @@ def solve_captcha_with_gemini(api_key, image_bytes):
 
 
 # --- TIẾN TRÌNH ĐIỀN FORM (WORKER) - PHIÊN BẢN ĐÃ VIẾT LẠI ---
-# --- TIẾN TRÌNH ĐIỀN FORM (WORKER) - PHIÊN BẢN ĐÃ VIẾT LẠI ---
 def fill_and_submit_process(task_info):
     url = task_info["url"]
     chrome_options = task_info["options"]
@@ -198,7 +116,7 @@ def fill_and_submit_process(task_info):
     use_ai_captcha = task_info["use_ai_captcha"]
     api_keys = task_info["api_keys"]
     FORM_FIELD_IDS = task_info["FORM_FIELD_IDS"]
-    keep_failed_tab = task_info["keep_failed_tab"]
+
     driver = None
     success = False
     name_for_log = data.get("full_name", f"Task {process_id}")
@@ -207,9 +125,10 @@ def fill_and_submit_process(task_info):
         service = webdriver.chrome.service.Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
         driver.get(url)
-        wait = WebDriverWait(driver, 5)  # Tăng thời gian chờ lên 5 giây cho ổn định
+        wait = WebDriverWait(driver, 5)
 
         # --- VÒNG LẶP ĐIỀN FORM ĐỘNG ---
+        # Sắp xếp thứ tự ưu tiên: sales_date -> session -> các trường khác
         field_order = ["sales_date", "session"] + [
             k
             for k in FORM_FIELD_IDS.keys()
@@ -229,45 +148,18 @@ def fill_and_submit_process(task_info):
                 value = data.get(key)
 
                 if tag == "select":
-                    if not value:
-                        continue
-
-                    select = Select(element)
-
-                    # <<< THAY ĐỔI QUAN TRỌNG BẮT ĐẦU TỪ ĐÂY >>>
-                    # Nếu là dropdown 'session', tìm kiếm thông minh hơn
-                    if key == "session":
-                        print(
-                            f"[{process_id}] Finding smart match for '{key}' with value '{value}'..."
-                        )
-                        found_option = False
-                        for option in select.options:
-                            # Kiểm tra xem option có chứa chuỗi thời gian mong muốn không
-                            if str(value) in option.text:
-                                print(
-                                    f"[{process_id}] Found match: '{option.text}'. Selecting..."
-                                )
-                                select.select_by_visible_text(option.text)
-                                found_option = True
-                                break  # Thoát khỏi vòng lặp khi đã tìm thấy
-                        if not found_option:
-                            print(
-                                f"[{process_id}] WARNING: Could not find any option containing '{value}' for '{key}'."
-                            )
-                    else:
-                        # Giữ nguyên logic cũ cho các dropdown khác như 'sales_date'
+                    if value:
                         print(
                             f"[{process_id}] Selecting '{value}' in dropdown '{key}'..."
                         )
-                        select.select_by_visible_text(str(value))
-                    # <<< KẾT THÚC THAY ĐỔI >>>
-
-                    # Kích hoạt sự kiện 'change' để website nhận diện
-                    driver.execute_script(
-                        "arguments[0].dispatchEvent(new Event('change'));", element
-                    )
-                    if key == "sales_date":
-                        time.sleep(1)
+                        Select(element).select_by_visible_text(str(value))
+                        # Kích hoạt sự kiện 'change' bằng JavaScript
+                        driver.execute_script(
+                            "arguments[0].dispatchEvent(new Event('change'));", element
+                        )
+                        # Chờ lâu hơn để đảm bảo React cập nhật DOM
+                        if key == "sales_date":
+                            time.sleep(1)
 
                 elif tag == "input":
                     input_type = element.get_attribute("type").lower()
@@ -370,18 +262,9 @@ def fill_and_submit_process(task_info):
         return False, name_for_log
 
     finally:
-        # <<< LOGIC QUYẾT ĐỊNH ĐÓNG TAB >>>
         if driver:
-            # Chỉ đóng tab nếu: 1. Thành công, HOẶC 2. Người dùng không muốn giữ lại tab lỗi
-            if success or not keep_failed_tab:
-                time.sleep(1)  # Chờ 1 giây trước khi đóng
-                driver.quit()
-            else:
-                # Nếu thất bại và người dùng muốn giữ lại tab
-                print(
-                    f"[{process_id}] THẤT BẠI. Giữ lại tab của '{name_for_log}' để kiểm tra."
-                )
-                # Để tab lại và không làm gì cả
+            time.sleep(2)
+            driver.quit()
 
 
 def analyze_form_with_gemini(api_key, html_content, excel_columns):
@@ -522,21 +405,13 @@ class AutoFillerApp(tk.Tk):
             text="Chạy ẩn (Không thể nhập CAPTCHA thủ công)",
             variable=self.headless_var,
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=5, pady=5)
-        # <<< THÊM ĐOẠN NÀY VÀO >>>
-        self.keep_failed_tab_var = tk.BooleanVar(value=True)  # Mặc định bật
-        ttk.Checkbutton(
-            adv_frame,
-            text="Giữ lại tab thất bại để kiểm tra",
-            variable=self.keep_failed_tab_var,
-        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=5, pady=5)
-        # <<< KẾT THÚC ĐOẠN THÊM >>>
         ttk.Label(adv_frame, text="Số Tab chạy cùng lúc:").grid(
-            row=2, column=0, sticky="w", padx=5, pady=3
+            row=1, column=0, sticky="w", padx=5, pady=3
         )
         self.max_workers_var = tk.StringVar(value=str(min(os.cpu_count() or 1, 8)))
         ttk.Spinbox(
             adv_frame, from_=1, to=50, textvariable=self.max_workers_var, width=10
-        ).grid(row=2, column=1, sticky="w", padx=5, pady=3)
+        ).grid(row=1, column=1, sticky="w", padx=5, pady=3)
 
         # --- Frame Cấu hình AI ---
         ai_frame = ttk.LabelFrame(
@@ -608,8 +483,8 @@ class AutoFillerApp(tk.Tk):
         api_keys_list = [key.strip() for key in api_keys_str.split(",") if key.strip()]
         max_workers = int(self.max_workers_var.get())
         session_choice = self.session_choice_var.get()
-        keep_failed_tab = self.keep_failed_tab_var.get()
-        if not url or not excel_file:
+
+        if not all([url, excel_file]):
             messagebox.showerror("Lỗi", "Vui lòng nhập URL và chọn file Excel.")
             self.start_button.config(state="normal")
             return
@@ -617,76 +492,66 @@ class AutoFillerApp(tk.Tk):
             messagebox.showerror("Lỗi", "Vui lòng nhập API Key để dùng chức năng AI.")
             self.start_button.config(state="normal")
             return
-        if use_ai and not LANGCHAIN_AVAILABLE:
-            messagebox.showerror("Lỗi", "Cần cài đặt 'langchain-google-genai'.")
-            self.start_button.config(state="normal")
-            return
 
         try:
             self.log_message("--- BẮT ĐẦU QUÁ TRÌNH ---")
-
-            # Đọc file Excel
             df = pd.read_excel(excel_file, dtype=str)
-            excel_columns = list(df.columns)
-            self.log_message(
-                f"Đã đọc {len(df)} dòng từ Excel. Các cột: {excel_columns}"
-            )
+            self.log_message(f"Đã đọc {len(df)} dòng từ Excel.")
 
-            # Lấy nội dung HTML
-            html_content_input = self.html_text.get("1.0", tk.END).strip()
-            if not html_content_input:
-                self.log_message("Đang tải nội dung HTML từ URL...")
-                with webdriver.Chrome(
-                    service=webdriver.chrome.service.Service(
-                        ChromeDriverManager().install()
-                    ),
-                    options=get_chrome_options(headless=True),
-                ) as temp_driver:
-                    temp_driver.get(url)
-                    html_content = temp_driver.page_source
-            else:
-                html_content = html_content_input
-                self.log_message("Sử dụng nội dung HTML từ ô nhập liệu.")
+            mapping_data = None
+            if os.path.exists(MAPPING_FILE):
+                try:
+                    with open(MAPPING_FILE, "r", encoding="utf-8") as f:
+                        mapping_data = json.load(f)
+                    self.log_message(f"Đã tải cấu trúc form từ file '{MAPPING_FILE}'.")
+                except Exception as e:
+                    self.log_message(
+                        f"Lỗi khi đọc file mapping: {e}. Sẽ tiến hành phân tích lại."
+                    )
 
-            # Phân tích Form bằng AI
-            self.log_message("Đang gửi yêu cầu đến Gemini để phân tích form...")
-            # mapping_data, error_message = analyze_form_with_gemini(
-            #     api_keys_list[0], html_content, excel_columns
-            # )
-            mapping_data, error_message = None, "No API keys succeeded."
-            for i, api_key in enumerate(api_keys_list):
-                self.log_message(f"Đang thử phân tích HTML với key #{i+1}...")
-                mapping_data, error_message = analyze_form_with_gemini(
-                    api_key, html_content, excel_columns
-                )
-                if mapping_data:
-                    self.log_message(f"Phân tích HTML thành công với key #{i+1}.")
-                    break
-                self.log_message(f"Key #{i+1} thất bại: {error_message}")
             if not mapping_data:
-                messagebox.showerror(
-                    "Lỗi Gemini", f"Không thể phân tích form: {error_message}"
+                self.log_message(
+                    "Chưa có file cấu trúc, tiến hành phân tích form bằng AI..."
                 )
-                self.start_button.config(state="normal")
-                return
-            if error_message:
-                messagebox.showerror(
-                    "Lỗi Gemini", f"Không thể phân tích form: {error_message}"
+                html_content_input = self.html_text.get("1.0", tk.END).strip()
+                if not html_content_input:
+                    self.log_message("Đang tải HTML từ URL...")
+                    with webdriver.Chrome(
+                        service=webdriver.chrome.service.Service(
+                            ChromeDriverManager().install()
+                        ),
+                        options=get_chrome_options(headless=True),
+                    ) as temp_driver:
+                        temp_driver.get(url)
+                        html_content = temp_driver.page_source
+                else:
+                    html_content = html_content_input
+
+                excel_columns = list(df.columns)
+                api_key_to_use = api_keys_list[0] if api_keys_list else None
+                mapping_data, error = analyze_form_with_gemini(
+                    api_key_to_use, html_content, excel_columns
                 )
-                self.start_button.config(state="normal")
-                return
+
+                if error:
+                    messagebox.showerror(
+                        "Lỗi Phân Tích", f"Không thể phân tích form: {error}"
+                    )
+                    self.start_button.config(state="normal")
+                    return
+
+                with open(MAPPING_FILE, "w", encoding="utf-8") as f:
+                    json.dump(mapping_data, f, indent=4)
+                self.log_message(
+                    f"Phân tích thành công và đã lưu cấu trúc vào '{MAPPING_FILE}'."
+                )
 
             FORM_FIELD_IDS = mapping_data["FORM_FIELD_IDS"]
             EXCEL_COLUMN_MAPPING = mapping_data["EXCEL_COLUMN_MAPPING"]
-            self.log_message("Gemini đã phân tích thành công. Mapping được tạo:")
             self.log_message(
-                f"  FORM_FIELD_IDS: {json.dumps(FORM_FIELD_IDS, indent=2)}"
-            )
-            self.log_message(
-                f"  EXCEL_COLUMN_MAPPING: {json.dumps(EXCEL_COLUMN_MAPPING, indent=2)}"
+                f"Gemini đã phân tích thành công. Mapping được tạo:\n  FORM_FIELD_IDS: {json.dumps(FORM_FIELD_IDS, indent=2)}\n  EXCEL_COLUMN_MAPPING: {json.dumps(EXCEL_COLUMN_MAPPING, indent=2)}"
             )
 
-            # Lấy danh sách ngày bán hàng từ web để tạo task
             self.log_message("Đang lấy danh sách ngày bán hàng từ trang web...")
             with webdriver.Chrome(
                 service=webdriver.chrome.service.Service(
@@ -715,32 +580,33 @@ class AutoFillerApp(tk.Tk):
                 self.log_message("Lỗi: Không tìm thấy ngày bán hàng hợp lệ trên web.")
                 self.start_button.config(state="normal")
                 return
-
             self.log_message(
                 f"Các ngày bán hàng hợp lệ: {', '.join(valid_sales_dates)}"
             )
             self.log_message(f"Đã chọn điền cho phiên: {session_choice}")
 
-            # Chuẩn bị tasks
             tasks = []
             for _, row in df.iterrows():
                 base_data = {}
-                for form_key, excel_col in EXCEL_COLUMN_MAPPING.items():
-                    if (
-                        excel_col
-                        and excel_col in row
-                        and form_key not in ["day", "month", "year"]
-                    ):
-                        if form_key == "phone_number":
-                            base_data[form_key] = normalize_phone(row[excel_col])
-                        else:
-                            base_data[form_key] = str(row[excel_col])
-
-                dob_excel_col = EXCEL_COLUMN_MAPPING.get(
-                    "day"
-                ) or EXCEL_COLUMN_MAPPING.get("date_of_birth")
-                if dob_excel_col and dob_excel_col in row:
-                    base_data.update(format_date_parts(row[dob_excel_col]))
+                # --- BẮT ĐẦU SỬA LỖI ---
+                # Logic mới để xử lý cả string và list trong mapping
+                for form_key, excel_col_spec in EXCEL_COLUMN_MAPPING.items():
+                    # Xử lý trường hợp đặc biệt: giá trị là một list (như date_of_birth)
+                    if isinstance(excel_col_spec, list):
+                        # Khi giá trị là list, ta dùng chính `form_key` để tìm cột trong Excel
+                        # Ví dụ: form_key là 'date_of_birth', ta sẽ tìm cột 'date_of_birth' trong Excel
+                        if form_key in row:
+                            base_data.update(format_date_parts(row[form_key]))
+                    # Xử lý trường hợp thông thường: giá trị là một string
+                    else:
+                        excel_col = excel_col_spec
+                        if excel_col and excel_col in row:
+                            value = row[excel_col]
+                            if form_key == "phone_number":
+                                base_data[form_key] = normalize_phone(value)
+                            else:
+                                base_data[form_key] = str(value)
+                # --- KẾT THÚC SỬA LỖI ---
 
                 for s_date in valid_sales_dates:
                     task_data = base_data.copy()
@@ -756,7 +622,6 @@ class AutoFillerApp(tk.Tk):
                             "use_ai_captcha": use_ai,
                             "api_keys": api_keys_list,
                             "FORM_FIELD_IDS": FORM_FIELD_IDS,
-                            "keep_failed_tab": keep_failed_tab,
                         }
                     )
 
@@ -779,7 +644,17 @@ class AutoFillerApp(tk.Tk):
 
             self.log_message(traceback.format_exc())
         finally:
+            self._cleanup_mapping_file()
             self.start_button.config(state="normal")
+
+    def _cleanup_mapping_file(self):
+        """Hàm mới: Dọn dẹp file mapping nếu nó tồn tại."""
+        if os.path.exists(MAPPING_FILE):
+            try:
+                os.remove(MAPPING_FILE)
+                self.log_message(f"Đã xóa file cấu trúc tạm: '{MAPPING_FILE}'.")
+            except Exception as e:
+                self.log_message(f"Lỗi khi xóa file mapping: {e}")
 
     def process_results(self, async_results, total_tasks):
         success_count = 0
@@ -799,36 +674,13 @@ class AutoFillerApp(tk.Tk):
         )
 
     def on_closing(self):
+        """Xử lý khi người dùng đóng cửa sổ."""
         if messagebox.askokcancel("Thoát", "Bạn có muốn thoát chương trình?"):
+            self._cleanup_mapping_file()  # Gọi hàm dọn dẹp ở đây
             self.destroy()
 
 
-# --- SỬA ĐOẠN NÀY ---
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-
-    # !!! THAY ĐỔI URL NÀY KHI BẠN DEPLOY LÊN RENDER !!!
-    # BACKEND_URL = "https://your-backend-app-name.onrender.com"
-    BACKEND_URL = "http://127.0.0.1:5000"
-    # Để test local, dùng: BACKEND_URL = "http://127.0.0.1:5000"
-
-    # Tạo cửa sổ chính và hiển thị nó
-    root = tk.Tk()
-
-    # Khởi tạo trình quản lý xác thực và cửa sổ đăng nhập
-    auth_manager = AuthManager(BACKEND_URL)
-    login_window = LoginWindow(root, auth_manager)
-
-    # Chờ cho đến khi cửa sổ đăng nhập được đóng
-    root.wait_window(login_window)
-
-    # Kiểm tra xem đăng nhập có thành công không
-    if login_window.login_successful:
-        print("Đăng nhập thành công, đang mở ứng dụng chính...")
-        # Ẩn cửa sổ đăng nhập và hiện cửa sổ chính
-        root.deiconify()
-        app = AutoFillerApp()  # Bỏ 'root'
-        root.mainloop()
-    else:
-        print("Đăng nhập thất bại hoặc đã đóng cửa sổ. Thoát chương trình.")
-        root.destroy()
+    app = AutoFillerApp()
+    app.mainloop()

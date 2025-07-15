@@ -1,0 +1,12 @@
+pandas
+openpyxl
+selenium
+webdriver-manager
+langchain-google-genai
+Flask
+Flask-SQLAlchemy
+PyMySQL
+PyJWT
+Werkzeug
+gunicorn
+psycopg2-binary
