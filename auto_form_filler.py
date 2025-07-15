@@ -837,8 +837,8 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
 
     # URL của backend API, thay đổi nếu cần
-    # BACKEND_URL = "https://toolchup.onrender.com"  # URL của server Render
-    BACKEND_URL = "http://127.0.0.1:5000"  # URL để test local
+    BACKEND_URL = "https://toolchup.onrender.com"  # URL của server Render
+    # BACKEND_URL = "http://127.0.0.1:5000"  # URL để test local
 
     # --- BƯỚC 1: KHỞI TẠO CÁC THÀNH PHẦN CHÍNH ---
     auth_manager = AuthManager(BACKEND_URL)
